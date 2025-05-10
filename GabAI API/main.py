@@ -1,32 +1,66 @@
-import google.generativeai as genai
+from fastapi import FastAPI, File, UploadFile
+from fastapi.responses import JSONResponse
 from PIL import Image
-import os
+import google.generativeai as genai
+import io
 
-
-# Configure your Gemini API key
+# Configure Gemini API
 genai.configure(api_key="AIzaSyADjfHTmw-_ovAZQN487UvAnwp3HvXnFXI")
-
-# Initialize the vision model
 model = genai.GenerativeModel("gemini-2.0-flash")
 
-def analyze_pantry_image(image_path):
+app = FastAPI()
+
+import json
+
+@app.post("/analyze-pantry/")
+async def analyze_pantry_image(file: UploadFile = File(...)):
     """
-    Takes a picture of a pantry and generates a recipe.
+    Receives an image and generates detailed recipes using pantry items.
+    Returns a dictionary where the key is the dish name and the value is a dictionary of detailed steps.
     """
-    img = Image.open(image_path)
-    prompt = "Generate a recipe using the items you see in this pantry image. Be creative but practical. Ration it into multiple meals and stretch it as long as possible. Use the ingredients that tend to spoil first"
+    image_data = await file.read()
+    img = Image.open(io.BytesIO(image_data))
+    
+    prompt = (
+        "From this pantry image, identify all usable ingredients and generate multiple recipes. "
+        "Each recipe should use ingredients that are likely to spoil first. "
+        "For each recipe, break it down into clear and detailed steps, including exact measurements, cooking methods, and timing. "
+        "Return the result in valid JSON format like this:\n\n"
+        "{\n"
+        "  \"Recipe Name 1\": {\n"
+        "    \"Step 1\": \"instruction...\",\n"
+        "    \"Step 2\": \"instruction...\"\n"
+        "  },\n"
+        "  \"Recipe Name 2\": {\n"
+        "    \"Step 1\": \"instruction...\",\n"
+        "    \"Step 2\": \"instruction...\"\n"
+        "  }\n"
+        "}\n"
+        "Do not include any explanation or extra text—just return a valid JSON object."
+    )
 
     response = model.generate_content([prompt, img])
-    return response.text
+    
+    # Attempt to parse the output as JSON
+    try:
+        # Clean common formatting mistakes if needed
+        response_text = response.text.strip().strip("```json").strip("```").strip()
+        recipe_dict = json.loads(response_text)
+    except json.JSONDecodeError:
+        return JSONResponse(content={"error": "Could not parse model response as JSON."}, status_code=400)
 
-def check_food_freshness(image_path):
+    return JSONResponse(content={"recipes": recipe_dict})
+
+
+
+@app.post("/check-freshness/")
+async def check_food_freshness(file: UploadFile = File(...)):
     """
-    Takes a picture of perishable goods and returns a list of visible ingredients,
-    sorted by shelf life (shortest to longest) in the format:
-    'Ingredient Name: X'
-    Where X is the number of days left before it spoils.
+    Receives an image and returns a sorted dict of perishable ingredients
+    and how many days they have left.
     """
-    img = Image.open(image_path)
+    image_data = await file.read()
+    img = Image.open(io.BytesIO(image_data))
     prompt = (
         "From this image, identify all visible perishable food items. "
         "Return the list sorted in ascending order based on how soon each item will expire. "
@@ -35,21 +69,19 @@ def check_food_freshness(image_path):
     )
 
     response = model.generate_content([prompt, img])
-    return response.text
+    lines = response.text.strip().splitlines()
+    ingredient_dict = {}
 
+    for line in lines:
+        if ':' in line:
+            name, days = line.split(':', 1)
+            try:
+                ingredient_dict[name.strip()] = int(days.strip())
+            except ValueError:
+                continue  # skip if not parsable
 
+    return JSONResponse(content={"freshness": ingredient_dict})
 
-
-# === EXAMPLE USAGE ===
-
-# Pantry example
-pantry_result = check_food_freshness("pantry.jpg")
-pantry_result = pantry_result.splitlines()
-ingredient_dict = {}
-for item in pantry_result:
-    name, days_left = item.split(':')
-    ingredient_dict[name.strip()] = int(days_left.strip().split()[0])
-print("Food Freshness:\n", ingredient_dict)
-print("Recipe Suggestion:\n", pantry_result)
-
-# Food freshness example
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("main:app", host="127.0.0.1", port=8000, reload=True)

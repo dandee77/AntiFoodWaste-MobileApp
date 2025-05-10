@@ -1,114 +1,55 @@
-from fastapi import FastAPI, UploadFile, File, HTTPException
-from fastapi.responses import JSONResponse
-from fastapi.middleware.cors import CORSMiddleware
 import google.generativeai as genai
-import os
-from dotenv import load_dotenv
-import logging
 from PIL import Image
-import io
+import os
 
-#test 
 
-# Load environment variables
-load_dotenv()
+# Configure your Gemini API key
+genai.configure(api_key="AIzaSyADjfHTmw-_ovAZQN487UvAnwp3HvXnFXI")
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+# Initialize the vision model
+model = genai.GenerativeModel("gemini-2.0-flash")
 
-# Initialize FastAPI app
-app = FastAPI(
-    title="Tourist Attraction Analyzer",
-    description="API that analyzes images of tourist attractions using Google Gemini",
-    version="1.0.0"
-)
-
-# Configure CORS
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# Configure Gemini
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-if not GEMINI_API_KEY:
-    raise ValueError("GEMINI_API_KEY environment variable not set")
-
-genai.configure(api_key=GEMINI_API_KEY)
-model = genai.GenerativeModel('gemini-2.5-pro-exp-03-25')
-
-@app.post("/analyze-attraction/", response_class=JSONResponse)
-async def analyze_tourist_attraction(image: UploadFile = File(...)):
+def analyze_pantry_image(image_path):
     """
-    Analyze an image of a tourist attraction and return its history and details.
-    
-    Args:
-        image: UploadFile containing the image to analyze
-        
-    Returns:
-        JSON response with attraction details or error message
+    Takes a picture of a pantry and generates a recipe.
     """
-    try:
-        # Check if the file is an image
-        if not image.content_type.startswith('image/'):
-            raise HTTPException(status_code=400, detail="File must be an image")
-        
-        logger.info(f"Processing image: {image.filename}")
-        
-        # Read the image file and convert to PIL Image
-        image_bytes = await image.read()
-        img = Image.open(io.BytesIO(image_bytes))
-        
-        # Prepare the prompt
-        prompt = """
-        Analyze this image and identify if it shows a known tourist attraction. 
-        If it is a tourist attraction, provide the following details in JSON format:
-        {
-            "name": "Official name of the attraction",
-            "location": "City and country where it's located",
-            "type": "Type of attraction (e.g., historical site, museum, natural wonder)",
-            "year_built": "When it was built or discovered",
-            "historical_significance": "Brief history and why it's significant",
-            "architectural_style": "If applicable, the architectural style",
-            "interesting_facts": ["Array", "of", "interesting", "facts"],
-            "recognition": "Any UNESCO or other recognition it has received",
-            "visitor_information": "Typical visitor numbers or best times to visit"
-        }
-        
-        If the image doesn't contain a recognizable tourist attraction, return:
-        {
-            "error": "No recognized tourist attraction in the image"
-        }
-        """
-        
-        # Call Gemini API with the PIL Image
-        response = model.generate_content([prompt, img])
-        
-        # Process the response
-        if not response.text:
-            raise HTTPException(status_code=500, detail="No response from Gemini API")
-        
-        # Try to parse the response (Gemini should return JSON as a string)
-        try:
-            # The response might include markdown formatting, so we need to clean it
-            json_str = response.text.strip().replace('```json', '').replace('```', '').strip()
-            return JSONResponse(content=eval(json_str))
-        except Exception as e:
-            logger.error(f"Error parsing Gemini response: {str(e)}")
-            return JSONResponse(content={"response": response.text})
-            
-    except Exception as e:
-        logger.error(f"Error processing image: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+    img = Image.open(image_path)
+    prompt = "Generate a recipe using the items you see in this pantry image. Be creative but practical. Ration it into multiple meals and stretch it as long as possible. Use the ingredients that tend to spoil first"
 
-@app.get("/")
-async def root():
-    return {"message": "Tourist Attraction Analyzer API is running"}
+    response = model.generate_content([prompt, img])
+    return response.text
 
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+def check_food_freshness(image_path):
+    """
+    Takes a picture of perishable goods and returns a list of visible ingredients,
+    sorted by shelf life (shortest to longest) in the format:
+    'Ingredient Name: X'
+    Where X is the number of days left before it spoils.
+    """
+    img = Image.open(image_path)
+    prompt = (
+        "From this image, identify all visible perishable food items. "
+        "Return the list sorted in ascending order based on how soon each item will expire. "
+        "Use this format exactly: 'Ingredient Name: X' where X is the number of days left (only the number, no units or extra text). "
+        "Do not include explanations—just the list."
+    )
+
+    response = model.generate_content([prompt, img])
+    return response.text
+
+
+
+
+# === EXAMPLE USAGE ===
+
+# Pantry example
+pantry_result = check_food_freshness("pantry.jpg")
+pantry_result = pantry_result.splitlines()
+ingredient_dict = {}
+for item in pantry_result:
+    name, days_left = item.split(':')
+    ingredient_dict[name.strip()] = int(days_left.strip().split()[0])
+print("Food Freshness:\n", ingredient_dict)
+print("Recipe Suggestion:\n", pantry_result)
+
+# Food freshness example

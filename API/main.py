@@ -57,10 +57,9 @@ async def check_food_freshness(file: UploadFile = File(...)):
         "The confidence score should be a number between 0 and 100, where 100 means highly confident in the prediction. "
         "Return the result in this **strict JSON format** with no markdown, text, or commentary:\n\n"
         "{\n"
-        "  \"Potato\": {\"days_left\": 2, \"confidence\": 85},\n"
-        "  \"Spinach\": {\"days_left\": 1, \"confidence\": 90},\n"
-        "  \"Carrot\": {\"days_left\": 5, \"confidence\": 80}\n"
-        "}"
+        "  \"<Vegetable Name>\": {\"days_left\": <Number>, \"confidence\": <Number>},\n"
+        "  \"<Another Vegetable>\": {\"days_left\": <Number>, \"confidence\": <Number>}\n"
+        "}\n"
     )
 
     response = model.generate_content([prompt, img])

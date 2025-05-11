@@ -4,46 +4,17 @@ from PIL import Image
 import google.generativeai as genai
 import io
 import json
+from dotenv import load_dotenv
+from loguru import logger
+from os import getenv
 
-# Configure Gemini API
-genai.configure(api_key="AIzaSyADjfHTmw-_ovAZQN487UvAnwp3HvXnFXI")
+load_dotenv()
+
+GEMINI_API_KEY = getenv("GEMINI_API_KEY")
+genai.configure(api_key=GEMINI_API_KEY)
 model = genai.GenerativeModel("gemini-2.0-flash")
 
 app = FastAPI()
-
-
-@app.post("/analyze-pantry/")
-async def analyze_pantry_image(file: UploadFile = File(...)):
-    image_data = await file.read()
-    img = Image.open(io.BytesIO(image_data))
-    
-    prompt = (
-        "From this pantry image, identify all usable ingredients and generate 2–3 simple recipes. "
-        "Focus on ingredients likely to expire soon. "
-        "Return result in **valid JSON** exactly like this:\n\n"
-        "{\n"
-        "  \"Recipe Name 1\": {\n"
-        "    \"Step 1\": \"...\",\n"
-        "    \"Step 2\": \"...\"\n"
-        "  },\n"
-        "  \"Recipe Name 2\": {\n"
-        "    \"Step 1\": \"...\",\n"
-        "    \"Step 2\": \"...\"\n"
-        "  }\n"
-        "}\n"
-        "DO NOT include any explanation or markdown—just return raw JSON."
-    )
-
-    response = model.generate_content([prompt, img])
-
-    try:
-        response_text = response.text.strip().removeprefix("```json").removesuffix("```").strip()
-        recipe_dict = json.loads(response_text)
-    except json.JSONDecodeError:
-        return JSONResponse(content={"error": "Could not parse model response as JSON."}, status_code=400)
-
-    return JSONResponse(content={"recipes": recipe_dict})
-
 
 @app.post("/check-freshness/")
 async def check_food_freshness(file: UploadFile = File(...)):
@@ -51,14 +22,16 @@ async def check_food_freshness(file: UploadFile = File(...)):
     img = Image.open(io.BytesIO(image_data))
 
     prompt = (
-        "You are a food quality inspector. Carefully analyze the **visual condition** of each vegetable or perishable item in this image. "
-        "Estimate the number of days left before each one spoils based on visible signs of aging or rot such as discoloration, bruising, mold, wrinkles, or softness. "
-        "Additionally, provide a confidence score for each prediction, indicating how certain you are about the freshness estimate. "
-        "The confidence score should be a number between 0 and 100, where 100 means highly confident in the prediction. "
-        "Return the result in this **strict JSON format** with no markdown, text, or commentary:\n\n"
+        "You are a food quality inspector. Carefully analyze the **visible condition** of each vegetable or perishable item in the image provided. "
+        "For each visible vegetable or perishable food item, estimate the number of days left before it spoils based on the following factors:\n"
+        "- **Color and Texture**: Look for any discoloration, wrinkles, bruising, or softness.\n"
+        "- **Bruising and Mold**: These factors can drastically reduce shelf life.\n"
+        "- **Size and Firmness**: Shriveling or softness usually means it's closer to spoilage.\n"
+        "- **Standard Shelf Life Adjustments**: For specific items (e.g., leafy greens, potatoes, carrots), adjust based on their usual spoilage patterns.\n\n"
+        "The result must be returned in the following JSON format (use actual detected vegetables from the image, not examples):\n\n"
         "{\n"
-        "  \"<Vegetable Name>\": {\"days_left\": <Number>, \"confidence\": <Number>},\n"
-        "  \"<Another Vegetable>\": {\"days_left\": <Number>, \"confidence\": <Number>}\n"
+        "  \"<Vegetable Name>\": {\"days_left\": <Number>, \"observation\": <String>},\n"
+        "  \"<Another Vegetable>\": {\"days_left\": <Number>, \"observation\": <String>}\n"
         "}\n"
     )
 
@@ -70,7 +43,6 @@ async def check_food_freshness(file: UploadFile = File(...)):
     except json.JSONDecodeError:
         return JSONResponse(content={"error": "Could not parse model response as JSON."}, status_code=400)
 
-    # Sort the results by days left, ascending, and return the JSON
     sorted_dict = dict(sorted(ingredient_dict.items(), key=lambda item: item[1]['days_left']))
 
     return JSONResponse(content=sorted_dict)
